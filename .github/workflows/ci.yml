@@ -67,10 +67,11 @@ jobs:
           python -c "
           import pandas as pd, pathlib
           df = pd.read_csv('data/raw/PhiUSIIL_Phishing_URL_Dataset.csv',
-                           usecols=['URL'], nrows=500)
+                           usecols=['URL'])
+          sample = df['URL'].dropna().sample(n=2000, random_state=42)
           pathlib.Path('reports/sample_urls.txt').write_text(
-              '\n'.join(df['URL'].dropna().astype(str).tolist()))
-          print(f'Wrote {len(df)} sample URLs for drift check')
+              '\n'.join(sample.astype(str).tolist()))
+          print(f'Wrote {len(sample)} sample URLs for drift check')
           "
           python -m phishguard.drift_monitor \
             --urls reports/sample_urls.txt \
