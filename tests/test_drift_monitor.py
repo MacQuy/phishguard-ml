@@ -6,11 +6,8 @@ requiring a trained model or training report on disk.
 """
 from __future__ import annotations
 
-import json
-import tempfile
-from pathlib import Path
-
 import numpy as np
+import pandas as pd
 import pytest
 
 from phishguard.drift_monitor import (
@@ -20,9 +17,7 @@ from phishguard.drift_monitor import (
     compute_baseline_stats,
     run_drift_check,
 )
-import pandas as pd
 from phishguard.features import FEATURE_NAMES
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -58,7 +53,11 @@ def _make_baseline_from_urls(urls: list[str]) -> BaselineStats:
             pass
     df = pd.DataFrame(rows, columns=FEATURE_NAMES)
     stats = compute_baseline_stats(df)
-    return BaselineStats(means=stats["means"], stds=stats["stds"], percentiles=stats["percentiles"])
+    return BaselineStats(
+        means=stats["means"],
+        stds=stats["stds"],
+        percentiles=stats["percentiles"],
+    )
 
 
 def _legit_urls(n: int = 60) -> list[str]:
@@ -66,9 +65,8 @@ def _legit_urls(n: int = 60) -> list[str]:
 
 
 def _phishing_urls(n: int = 60) -> list[str]:
-    """URLs with characteristics that push feature values away from baseline."""
     return [
-        f"http://192.0.2.{i % 255}/login%{i:02X}?user=admin&pass=x{'a'*50}"
+        f"http://192.0.2.{i % 255}/login%{i:02X}?user=admin&pass=x{'a' * 50}"
         for i in range(n)
     ]
 
@@ -86,8 +84,8 @@ class TestPSI:
 
     def test_very_different_distributions_high_psi(self):
         rng = np.random.default_rng(42)
-        base = rng.uniform(0, 0.1, 500)   # tightly clustered near 0
-        curr = rng.uniform(0.9, 1.0, 500)  # tightly clustered near 1
+        base = rng.uniform(0, 0.1, 500)
+        curr = rng.uniform(0.9, 1.0, 500)
         psi = _psi_for_feature(base, curr)
         assert psi > 0.25, f"Very different distributions should have PSI > 0.25, got {psi}"
 
@@ -122,9 +120,6 @@ class TestClassifyPSI:
 
 class TestRunDriftCheck:
     def test_stable_urls_return_stable_status(self):
-        # Build baseline FROM the same URL pool — PSI of identical distribution ≈ 0.
-        # This tests that identical distributions pass the gate, not that a 60-URL
-        # sample matches a 500-URL baseline (PSI is sensitive to sample size variance).
         urls = _legit_urls(200)
         baseline = _make_baseline_from_urls(urls)
         result = run_drift_check(urls, baseline)
@@ -180,4 +175,6 @@ class TestComputeBaselineStats:
         df = pd.DataFrame({f: rng.uniform(0, 1, 100) for f in FEATURE_NAMES})
         stats = compute_baseline_stats(df)
         for feat, pts in stats["percentiles"].items():
-            assert len(pts) == 101, f"Expected 101 percentile points for {feat}, got {len(pts)}"
+            assert len(pts) == 101, (
+                f"Expected 101 percentile points for {feat}, got {len(pts)}"
+            )

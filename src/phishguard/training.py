@@ -3,7 +3,6 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
-import os
 import platform
 import time
 from datetime import datetime, timezone
@@ -13,17 +12,25 @@ import joblib
 import mlflow
 import pandas as pd
 from sklearn.ensemble import RandomForestClassifier
-from sklearn.metrics import (accuracy_score, classification_report, confusion_matrix,
-                             precision_score, recall_score, f1_score, roc_auc_score)
+from sklearn.metrics import (
+    accuracy_score,
+    classification_report,
+    confusion_matrix,
+    f1_score,
+    precision_score,
+    recall_score,
+    roc_auc_score,
+)
 from sklearn.model_selection import train_test_split
 
-from phishguard.features import FEATURE_NAMES, extract_url_features, features_frame
 from phishguard.drift_monitor import compute_baseline_stats
+from phishguard.features import FEATURE_NAMES, extract_url_features
 
 ROOT = Path(__file__).resolve().parents[2]
 DATA_PATH = ROOT / "data/raw/PhiUSIIL_Phishing_URL_Dataset.csv"
 ARTIFACT_DIR = ROOT / "artifacts"
 REPORT_DIR = ROOT / "reports"
+
 
 def sha256_file(path: Path) -> str:
     digest = hashlib.sha256()
@@ -31,6 +38,7 @@ def sha256_file(path: Path) -> str:
         for chunk in iter(lambda: handle.read(1024 * 1024), b""):
             digest.update(chunk)
     return digest.hexdigest()
+
 
 def train(data_path: Path = DATA_PATH, model_path: Path | None = None) -> dict:
     started = time.time()
@@ -44,11 +52,13 @@ def train(data_path: Path = DATA_PATH, model_path: Path | None = None) -> dict:
     frame = frame[frame["label"].isin([0, 1])]
     frame = frame.drop_duplicates(subset=["URL"]).reset_index(drop=True)
     if len(frame) < 100 or frame["label"].nunique() != 2:
-        raise ValueError("Dataset must contain at least 100 unique URLs and both labels 0 and 1")
+        raise ValueError(
+            "Dataset must contain at least 100 unique URLs and both labels 0 and 1"
+        )
     feature_rows = []
     labels = []
     invalid_rows = 0
-    for url, label in zip(frame["URL"], frame["label"].astype(int)):
+    for url, label in zip(frame["URL"], frame["label"].astype(int), strict=False):
         try:
             feature_rows.append(extract_url_features(url))
         except ValueError:
@@ -61,8 +71,12 @@ def train(data_path: Path = DATA_PATH, model_path: Path | None = None) -> dict:
         X, y, test_size=0.20, random_state=42, stratify=y
     )
     model = RandomForestClassifier(
-        n_estimators=250, max_depth=24, min_samples_leaf=2,
-        class_weight="balanced_subsample", random_state=42, n_jobs=-1
+        n_estimators=250,
+        max_depth=24,
+        min_samples_leaf=2,
+        class_weight="balanced_subsample",
+        random_state=42,
+        n_jobs=-1,
     )
     mlflow.set_tracking_uri((ROOT / ".mlflow").as_uri())
     mlflow.set_experiment("phishguard-ml")
@@ -76,45 +90,92 @@ def train(data_path: Path = DATA_PATH, model_path: Path | None = None) -> dict:
         phishing_pred = (predicted == 0).astype(int)
         metrics = {
             "accuracy": float(accuracy_score(y_test, predicted)),
-            "phishing_precision": float(precision_score(phishing_truth, phishing_pred, zero_division=0)),
-            "phishing_recall": float(recall_score(phishing_truth, phishing_pred, zero_division=0)),
-            "phishing_f1": float(f1_score(phishing_truth, phishing_pred, zero_division=0)),
-            "roc_auc_phishing": float(roc_auc_score(phishing_truth, probabilities[:, phishing_index])),
+            "phishing_precision": float(
+                precision_score(phishing_truth, phishing_pred, zero_division=0)
+            ),
+            "phishing_recall": float(
+                recall_score(phishing_truth, phishing_pred, zero_division=0)
+            ),
+            "phishing_f1": float(
+                f1_score(phishing_truth, phishing_pred, zero_division=0)
+            ),
+            "roc_auc_phishing": float(
+                roc_auc_score(phishing_truth, probabilities[:, phishing_index])
+            ),
             "test_rows": int(len(y_test)),
             "train_rows": int(len(y_train)),
             "dataset_rows_after_cleaning": int(len(y)),
             "invalid_urls_skipped": int(invalid_rows),
             "features_count": len(FEATURE_NAMES),
             "confusion_matrix_labels_phishing_then_legitimate": confusion_matrix(
-                (y_test == 0).astype(int), (predicted == 0).astype(int), labels=[1, 0]
+                (y_test == 0).astype(int),
+                (predicted == 0).astype(int),
+                labels=[1, 0],
             ).tolist(),
         }
-        mlflow.log_params({"model": "RandomForestClassifier", "n_estimators": 250, "max_depth": 24,
-                           "random_state": 42, "feature_count": len(FEATURE_NAMES)})
+        mlflow.log_params({
+            "model": "RandomForestClassifier",
+            "n_estimators": 250,
+            "max_depth": 24,
+            "random_state": 42,
+            "feature_count": len(FEATURE_NAMES),
+        })
         mlflow.log_metrics({k: v for k, v in metrics.items() if isinstance(v, (int, float))})
         ARTIFACT_DIR.mkdir(parents=True, exist_ok=True)
         REPORT_DIR.mkdir(parents=True, exist_ok=True)
         model_path = model_path or ARTIFACT_DIR / "model.joblib"
-        joblib.dump({"model": model, "feature_names": FEATURE_NAMES, "model_version": "1.0.0",
-                     "label_mapping": {"0": "phishing", "1": "legitimate"}}, model_path)
+        joblib.dump(
+            {
+                "model": model,
+                "feature_names": FEATURE_NAMES,
+                "model_version": "1.0.0",
+                "label_mapping": {"0": "phishing", "1": "legitimate"},
+            },
+            model_path,
+        )
+        sklearn_version = __import__("sklearn").__version__
+        feature_importance = sorted(
+            [
+                {"feature": name, "importance": float(value)}
+                for name, value in zip(
+                    FEATURE_NAMES, model.feature_importances_, strict=False
+                )
+            ],
+            key=lambda item: item["importance"],
+            reverse=True,
+        )
         report = {
-            "project": "PhishGuard ML", "created_at": datetime.now(timezone.utc).isoformat(),
-            "model_version": "1.0.0", "dataset_file": data_path.name,
-            "dataset_sha256": sha256_file(data_path), "model_sha256": sha256_file(model_path),
-            "python_version": platform.python_version(), "sklearn_version": __import__("sklearn").__version__,
-            "mlflow_run_id": run.info.run_id, "feature_names": FEATURE_NAMES, "metrics": metrics,
-            "classification_report": classification_report(y_test, predicted, output_dict=True, zero_division=0),
-            "feature_importance": sorted(
-                [{"feature": name, "importance": float(value)} for name, value in zip(FEATURE_NAMES, model.feature_importances_)],
-                key=lambda item: item["importance"], reverse=True
+            "project": "PhishGuard ML",
+            "created_at": datetime.now(timezone.utc).isoformat(),
+            "model_version": "1.0.0",
+            "dataset_file": data_path.name,
+            "dataset_sha256": sha256_file(data_path),
+            "model_sha256": sha256_file(model_path),
+            "python_version": platform.python_version(),
+            "sklearn_version": sklearn_version,
+            "mlflow_run_id": run.info.run_id,
+            "feature_names": FEATURE_NAMES,
+            "metrics": metrics,
+            "classification_report": classification_report(
+                y_test, predicted, output_dict=True, zero_division=0
             ),
+            "feature_importance": feature_importance,
             "training_seconds": round(time.time() - started, 2),
             "feature_baseline_stats": compute_baseline_stats(X_train),
         }
-        (REPORT_DIR / "training_report.json").write_text(json.dumps(report, indent=2), encoding="utf-8")
-        print(json.dumps({"model_path": str(model_path), "report_path": str(REPORT_DIR / 'training_report.json'),
-                          "metrics": metrics, "model_sha256": report["model_sha256"]}, indent=2))
+        report_path = REPORT_DIR / "training_report.json"
+        report_path.write_text(json.dumps(report, indent=2), encoding="utf-8")
+        print(json.dumps(
+            {
+                "model_path": str(model_path),
+                "report_path": str(report_path),
+                "metrics": metrics,
+                "model_sha256": report["model_sha256"],
+            },
+            indent=2,
+        ))
         return report
+
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Train PhishGuard URL classifier")
@@ -122,6 +183,7 @@ def main() -> None:
     parser.add_argument("--model", type=Path, default=None)
     args = parser.parse_args()
     train(args.data, args.model)
+
 
 if __name__ == "__main__":
     main()

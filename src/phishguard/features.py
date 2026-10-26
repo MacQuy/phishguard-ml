@@ -32,7 +32,7 @@ def _normalise_url(value: str) -> str:
     if not parsed.hostname:
         raise ValueError("URL must contain a valid hostname")
     try:
-        parsed.port
+        _ = parsed.port
     except ValueError as exc:
         raise ValueError("URL contains an invalid port") from exc
     return candidate

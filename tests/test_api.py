@@ -1,5 +1,4 @@
 import os
-from pathlib import Path
 
 from fastapi.testclient import TestClient
 
@@ -18,6 +17,9 @@ def test_predict_requires_api_key():
     assert response.status_code == 401
 
 def test_invalid_url_rejected_with_auth():
-    response = client.post("/predict", headers={"X-API-Key": "test-secret-key-that-is-long-enough-123"},
-                           json={"url": "javascript:alert(1)"})
+    response = client.post(
+        "/predict",
+        headers={"X-API-Key": "test-secret-key-that-is-long-enough-123"},
+        json={"url": "javascript:alert(1)"},
+    )
     assert response.status_code == 422

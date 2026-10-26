@@ -1,5 +1,7 @@
 import pytest
+
 from phishguard.features import FEATURE_NAMES, extract_url_features, features_frame
+
 
 def test_feature_schema_is_stable():
     features = extract_url_features("https://example.com/path?q=1")
