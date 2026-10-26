@@ -1,0 +1,16 @@
+services:
+  phishguard-api:
+    build: .
+    ports:
+      - "127.0.0.1:8000:8000"
+    environment:
+      PHISHGUARD_API_KEY: ${PHISHGUARD_API_KEY:-local-dev-key-change-me}
+      PHISHGUARD_MODEL_PATH: /app/artifacts/model.joblib
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    restart: unless-stopped

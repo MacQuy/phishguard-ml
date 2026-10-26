@@ -1,0 +1,84 @@
+name: MLSecOps CI
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  test-and-security:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-dev.txt
+          pip install -e .
+
+      - name: Lint
+        run: ruff check src tests
+
+      - name: Unit and API tests
+        run: pytest -q
+
+      - name: Adversarial robustness tests
+        run: pytest tests/test_adversarial.py -v
+
+      - name: Bandit SAST
+        run: bandit -q -r src -ll
+
+      - name: Dependency vulnerability audit
+        run: pip-audit -r requirements.txt
+
+      - name: Generate SBOM (CycloneDX)
+        run: |
+          pip install cyclonedx-bom
+          cyclonedx-py environment --output-format JSON -o reports/sbom.json
+          echo "SBOM generated:"
+          python -c "
+          import json, pathlib
+          sbom = json.loads(pathlib.Path('reports/sbom.json').read_text())
+          components = sbom.get('components', [])
+          print(f'  Components: {len(components)}')
+          print(f'  Format: {sbom.get(\"bomFormat\", \"unknown\")} {sbom.get(\"specVersion\", \"\")}')
+          "
+
+      - name: Secret scan
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Dataset and model training
+        run: python -m phishguard.training
+
+      - name: ML release gate
+        run: python -m phishguard.security_gate
+
+      - name: Feature drift check (self-test on training URLs)
+        run: |
+          # Extract a sample of URLs from the dataset to validate drift monitor works.
+          # In production, point this at recent production traffic logs instead.
+          python -c "
+          import pandas as pd, pathlib
+          df = pd.read_csv('data/raw/PhiUSIIL_Phishing_URL_Dataset.csv',
+                           usecols=['URL'], nrows=500)
+          pathlib.Path('reports/sample_urls.txt').write_text(
+              '\n'.join(df['URL'].dropna().astype(str).tolist()))
+          print(f'Wrote {len(df)} sample URLs for drift check')
+          "
+          python -m phishguard.drift_monitor \
+            --urls reports/sample_urls.txt \
+            --output reports/drift_report.json
+          echo "Drift check complete"
+
+      - name: Upload reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: phishguard-ml-reports
+          path: reports/
