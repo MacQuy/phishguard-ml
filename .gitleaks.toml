@@ -1,0 +1,13 @@
+title = "PhishGuard gitleaks config"
+
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "Test fixture keys in test files are not real secrets"
+paths = [
+    "tests/.*\\.py",
+]
+regexes = [
+    "ci-test-key-not-a-real-secret",
+]
