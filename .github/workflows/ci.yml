@@ -38,6 +38,7 @@ jobs:
       - name: Generate SBOM (CycloneDX)
         run: |
           pip install cyclonedx-bom
+          mkdir -p reports
           cyclonedx-py environment --output-format JSON -o reports/sbom.json
           echo "SBOM generated:"
           python -c "
@@ -54,6 +55,8 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Dataset and model training
+        env:
+          MLFLOW_ALLOW_FILE_STORE: "true"
         run: python -m phishguard.training
 
       - name: ML release gate
@@ -61,8 +64,6 @@ jobs:
 
       - name: Feature drift check (self-test on training URLs)
         run: |
-          # Extract a sample of URLs from the dataset to validate drift monitor works.
-          # In production, point this at recent production traffic logs instead.
           python -c "
           import pandas as pd, pathlib
           df = pd.read_csv('data/raw/PhiUSIIL_Phishing_URL_Dataset.csv',
